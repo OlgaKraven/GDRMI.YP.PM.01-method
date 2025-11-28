@@ -1,0 +1,707 @@
+import DocsNav from '../DocsNav';
+
+<DocsNav />
+
+# Часть 2. Методические указания: выполнение практической части
+
+**Админ‑панель Flask · MySQL · Jinja2 · Аутентификация · CRUD · CSRF · Логирование**
+
+---
+
+## Описание задания
+
+Необходимо модернизировать панель администратора, интегрировав уже готовую HTML/CSS‑вёрстку в серверное приложение на Flask.
+
+Требуется:
+
+- подключить проект к существующей базе данных MySQL;
+- настроить параметры соединения и убедиться в корректном доступе к таблицам;
+- создать структуру проекта:
+  - `templates` — шаблоны;
+  - `models` — модели данных;
+  - `routes` / `views` — маршруты;
+  - `static` — статические файлы;
+  - `config.py` — конфигурация;
+- реализовать аутентификацию пользователей с формами входа и выхода;
+- ввести роль «администратор» и разграничение прав доступа;
+- разработать маршруты:
+  - вывод списков записей с пагинацией и фильтрацией;
+  - просмотр и редактирование записей;
+  - создание и удаление (CRUD);
+- интегрировать шаблоны Jinja2, чтобы данные из MySQL корректно отображались на страницах панели;
+- реализовать обработку ошибок (`404`, `500`, ошибки авторизации и валидации форм);
+- добавить защиту форм от CSRF и проверку вводимых данных;
+- организовать логирование действий администратора (добавление, редактирование, удаление);
+- протестировать приложение и убедиться, что админ‑панель:
+  - корректно взаимодействует с базой данных;
+  - отображает информацию;
+  - поддерживает все базовые функции серверного веб‑приложения на Flask.
+
+---
+
+## 0) Предварительные условия
+
+### Проверка Python (3.10+)
+
+В PowerShell:
+
+```powershell
+python --version
+```
+
+Если Python не установлен, его нужно установить с сайта `python.org`, не забыв поставить галочку **«Add to PATH»**.
+
+### Проверка MySQL (или MariaDB)
+
+Убедитесь, что служба базы данных запущена и вам известны:
+
+- хост (обычно `localhost`);
+- порт (`3306` или `3307`);
+- имя базы данных (например, `theatre`);
+- логин и пароль (например, `root` без пароля в XAMPP).
+
+Проверка входа:
+
+```bash
+mysql -u root -p
+```
+
+---
+
+## 1) Создание проекта и виртуального окружения
+
+### Папка проекта
+
+```powershell
+mkdir C:\Users\<you>\Desktop\theatre_admin
+cd C:\Users\<you>\Desktop\theatre_admin
+```
+
+### Виртуальное окружение (.venv)
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+---
+
+## 2) requirements.txt: описание и установка
+
+### 2.1. Содержимое requirements.txt
+
+Создайте файл `requirements.txt` и сохраните в корне проекта:
+
+```text
+Flask==3.0.3            # веб‑фреймворк
+Flask-WTF==1.2.1        # формы + CSRF
+Flask-Login==0.6.3      # сессии/логины
+Flask-SQLAlchemy==3.1.1 # ORM
+PyMySQL==1.1.1          # драйвер MySQL
+python-dotenv==1.0.1    # .env‑переменные
+email-validator==2.2.0  # валидация email для WTForms
+```
+
+Эти версии хорошо работают вместе на Python 3.10–3.12.
+
+Если в учебной аудитории проблемы с интернетом, зависимости можно установить из локальных пакетов, но базовый путь:
+
+### 2.2. Установка зависимостей
+
+```powershell
+pip install -r requirements.txt
+```
+
+---
+
+## 3) Подключение к БД: .env и проверка
+
+### 3.1. Создание файла .env
+
+Создайте `.env` рядом с `app.py`.
+
+**Вариант без пароля (часто XAMPP):**
+
+```text
+SECRET_KEY=dev_secret_for_flask
+DATABASE_URL=mysql+pymysql://root:@localhost:3306/theatre?charset=utf8mb4
+```
+
+**Вариант с паролем:**
+
+```text
+SECRET_KEY=dev_secret_for_flask
+DATABASE_URL=mysql+pymysql://root:YourPassHere@localhost:3306/theatre?charset=utf8mb4
+```
+
+Если в пароле есть спецсимволы, их нужно URL‑кодировать:
+
+- `@` → `%40`
+- `!` → `%21`
+- `#` → `%23`
+- `%` → `%25`
+- `:` → `%3A`
+- `/` → `%2F`
+
+### 3.2. Создание базы и импорт SQL‑дампа
+
+Если базы ещё нет:
+
+```bash
+mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS theatre DEFAULT CHARACTER SET utf8mb4"
+```
+
+Импорт учебного дампа:
+
+```bash
+mysql -u root -p theatre < "путь\к\файлу\theatre (1).sql"
+```
+
+---
+
+## 4) Структура проекта (создаём папки и файлы)
+
+Создайте структуру:
+
+```text
+theatre_admin/
+  app.py
+  config.py
+  requirements.txt
+  .env
+
+  seeds/
+    admin_seed.sql
+
+  blueprints/
+    admin/
+      __init__.py
+      models.py
+      forms.py
+      routes.py
+
+  templates/
+    base.html
+    login.html
+    errors/
+      404.html
+      500.html
+    admin/
+      dashboard.html
+      users_list.html
+      edit_user.html
+
+  static/
+    css/
+      styles.css
+    img/
+```
+
+- Ваш `styles.css` поместите в `static/css/styles.css`.
+- Вёрстку админ‑панели из `admin.htm` адаптируйте в `templates/admin/dashboard.html`.
+
+---
+
+## 5) config.py — конфигурация приложения
+
+```python
+# config.py
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+class Config:
+    SECRET_KEY = os.getenv("SECRET_KEY", "dev_secret")
+    SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL")
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        "pool_pre_ping": True,
+        "pool_recycle": 280,
+    }
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+```
+
+---
+
+## 6) app.py — инициализация Flask, регистрация блюпринта и ошибок
+
+```python
+# app.py
+from flask import Flask, render_template
+from config import Config
+
+
+def create_app():
+    app = Flask(__name__, static_folder="static", template_folder="templates")
+    app.config.from_object(Config)
+
+    # Отладочная печать (разово, можно закомментировать)
+    print("DB URI:", app.config.get("SQLALCHEMY_DATABASE_URI"))
+
+    # Регистрация блюпринта и инициализация расширений
+    from blueprints.admin import admin_bp, db, login_manager, csrf
+
+    db.init_app(app)
+    login_manager.init_app(app)
+    csrf.init_app(app)
+
+    app.register_blueprint(admin_bp, url_prefix="/")
+
+    # Обработчики ошибок
+    @app.errorhandler(404)
+    def not_found(e):
+        return render_template("errors/404.html"), 404
+
+    @app.errorhandler(500)
+    def internal_error(e):
+        return render_template("errors/500.html"), 500
+
+    return app
+
+
+if __name__ == "__main__":
+    app = create_app()
+    app.run(debug=True)
+```
+
+---
+
+## 7) Блюпринт admin: инициализация расширений
+
+```python
+# blueprints/admin/__init__.py
+from flask import Blueprint
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager
+from flask_wtf import CSRFProtect
+
+admin_bp = Blueprint("admin", __name__)
+
+db = SQLAlchemy()
+login_manager = LoginManager()
+login_manager.login_view = "admin.login"
+csrf = CSRFProtect()
+
+from . import routes  # noqa: E402,F401
+```
+
+---
+
+## 8) Модели (под вашу таблицу users)
+
+Важно: модель должна совпадать с колонками реальной таблицы `users`.
+
+```python
+# blueprints/admin/models.py
+from flask_login import UserMixin
+from . import db
+
+
+class User(UserMixin, db.Model):
+    __tablename__ = "users"
+
+    id = db.Column(db.Integer, primary_key=True)
+    login = db.Column(db.String(50), unique=True, nullable=False)
+    full_name = db.Column(db.String(150))
+    email = db.Column(db.String(150))
+    role_id = db.Column(db.Integer)
+    is_active = db.Column(db.Boolean, default=True)
+    password_hash = db.Column(db.String(255))
+
+    def get_id(self):
+        return str(self.id)
+```
+
+Если не уверены в структуре, выполните:
+
+```sql
+DESCRIBE users;
+```
+
+и подгоните модель под фактические поля.
+
+---
+
+## 9) Формы (WTForms) и CSRF
+
+```python
+# blueprints/admin/forms.py
+from flask_wtf import FlaskForm
+from wtforms import StringField, PasswordField, BooleanField, TextAreaField
+from wtforms.validators import DataRequired, Length, Email
+
+
+class LoginForm(FlaskForm):
+    login = StringField("Логин", validators=[DataRequired(), Length(min=3, max=50)])
+    password = PasswordField("Пароль", validators=[DataRequired(), Length(min=3, max=100)])
+
+
+class IntegrationForm(FlaskForm):
+    name = StringField("Название", validators=[DataRequired(), Length(max=100)])
+    type = StringField("Тип", validators=[DataRequired(), Length(max=50)])
+    config = TextAreaField("Конфигурация (JSON)")
+    is_active = BooleanField("Активна")
+```
+
+CSRF‑защита включена через `Flask-WTF` и `CSRFProtect`. В шаблонах обязательно:
+
+```html
+{{ form.hidden_tag() }}
+```
+
+---
+
+## 10) Аутентификация и «безопасная» проверка пароля
+
+```python
+# blueprints/admin/routes.py (фрагмент)
+from datetime import datetime
+from flask import render_template, request, redirect, url_for, flash, abort
+from flask_login import login_user, logout_user, login_required, current_user
+from werkzeug.security import check_password_hash, generate_password_hash
+
+from . import admin_bp, db, login_manager
+from .models import User
+from .forms import LoginForm, IntegrationForm
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    return db.session.get(User, int(user_id))
+
+
+def verify_password(stored: str, provided: str) -> bool:
+    """Если stored — werkzeug‑хеш (pbkdf2/...), проверяем корректно;
+    иначе — сравниваем как обычную строку (учебный fallback).
+    """
+    if not stored:
+        return False
+
+    is_werkzeug_hash = stored.startswith("pbkdf2:") or stored.count("$") >= 2
+
+    if is_werkzeug_hash:
+        try:
+            return check_password_hash(stored, provided)
+        except Exception:
+            return False
+
+    return stored == provided
+```
+
+```python
+@admin_bp.route("/login", methods=["GET", "POST"])
+def login():
+    if current_user.is_authenticated:
+        return redirect(url_for("admin.dashboard"))
+
+    form = LoginForm()
+
+    if form.validate_on_submit():
+        user = User.query.filter_by(login=form.login.data).first()
+
+        if user and user.is_active and verify_password(user.password_hash, form.password.data):
+            login_user(user)
+            flash("Добро пожаловать!", "success")
+            return redirect(url_for("admin.dashboard"))
+
+        flash("Неверный логин или пароль", "error")
+
+    return render_template("login.html", form=form)
+
+
+@admin_bp.route("/logout")
+@login_required
+def logout():
+    logout_user()
+    flash("Вы вышли из системы", "info")
+    return redirect(url_for("admin.login"))
+```
+
+---
+
+## 11) CRUD и защита (пагинация, фильтры, CSRF)
+
+Пример списка пользователей с фильтром и пагинацией.
+
+```python
+from functools import wraps
+
+
+def admin_required(fn):
+    # простой декоратор для роли (для учебной версии)
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not current_user.is_authenticated or current_user.role_id != 1:
+            abort(403)
+        return fn(*args, **kwargs)
+
+    return wrapper
+```
+
+```python
+@admin_bp.route("/")
+@login_required
+@admin_required
+def dashboard():
+    return render_template("admin/dashboard.html")
+
+
+@admin_bp.route("/users")
+@login_required
+@admin_required
+def users_list():
+    page = max(1, int(request.args.get("page", 1)))
+
+    q = User.query
+    search = request.args.get("q")
+    status = request.args.get("status")  # active / inactive
+
+    if search:
+        like = f"%{search}%"
+        q = q.filter(
+            (User.login.ilike(like)) |
+            (User.full_name.ilike(like))
+        )
+
+    if status in ("active", "inactive"):
+        q = q.filter(User.is_active == (status == "active"))
+
+    pagination = q.order_by(User.id.asc()).paginate(page=page, per_page=20, error_out=False)
+    users = pagination.items
+
+    return render_template(
+        "admin/users_list.html",
+        pagination=pagination,
+        users=users,
+        search=search,
+        status=status,
+    )
+```
+
+CSRF включён через `Flask-WTF` и `csrf.init_app(app)`. Для форм достаточно вызывать `{{ form.hidden_tag() }}` в шаблонах.
+
+---
+
+## 12) Шаблоны: интеграция вашей вёрстки
+
+### 12.1. Базовый шаблон и логин
+
+`templates/base.html`:
+
+```html
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>{% block title %}Админка{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="container" style="margin-top:1rem">
+        {% for category, message in messages %}
+          <div class="flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
+  {% block content %}{% endblock %}
+</body>
+</html>
+```
+
+`templates/login.html`:
+
+```html
+{% extends "base.html" %}
+{% block title %}Вход{% endblock %}
+
+{% block content %}
+<div class="container">
+  <h1>Вход в панель</h1>
+  <form method="post">
+    {{ form.hidden_tag() }}
+    <div>{{ form.login.label }}<br>{{ form.login }}</div>
+    <div style="margin-top:.5rem">{{ form.password.label }}<br>{{ form.password }}</div>
+    <button type="submit" style="margin-top:1rem">Войти</button>
+  </form>
+</div>
+{% endblock %}
+```
+
+### 12.2. Дашборд (перенос admin.htm)
+
+Минимальный каркас:
+
+```html
+{% extends "base.html" %}
+{% block title %}Панель администратора{% endblock %}
+{% block content %}
+<div class="container">
+  <h1>Панель администратора</h1>
+  <nav>
+    <a href="{{ url_for('admin.users_list') }}">Пользователи</a>
+    <a href="{{ url_for('admin.logout') }}" style="float:right">Выход</a>
+  </nav>
+  <!-- Вставьте сюда контент из admin.htm, адаптируя ссылки и данные -->
+</div>
+{% endblock %}
+```
+
+### 12.3. Списки/формы (пример списка пользователей)
+
+```html
+{% extends "base.html" %}
+{% block title %}Пользователи{% endblock %}
+{% block content %}
+<div class="container">
+  <h1>Пользователи</h1>
+  <form method="get" style="margin-bottom:1rem">
+    <input type="text" name="q" placeholder="Поиск"
+           value="{{ request.args.get('q', '') }}">
+    <select name="status">
+      <option value="">Все</option>
+      <option value="active"
+        {{ 'selected' if request.args.get('status') == 'active' }}>Активные</option>
+      <option value="inactive"
+        {{ 'selected' if request.args.get('status') == 'inactive' }}>Неактивные</option>
+    </select>
+    <button type="submit">Фильтр</button>
+  </form>
+
+  <table class="table">
+    <thead>
+      <tr>
+        <th>ID</th><th>Логин</th><th>ФИО</th><th>Email</th><th>Роль</th><th>Активен</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr>
+        <td>{{ u.id }}</td>
+        <td>{{ u.login }}</td>
+        <td>{{ u.full_name }}</td>
+        <td>{{ u.email }}</td>
+        <td>{{ u.role_id }}</td>
+        <td>{{ 'да' if u.is_active else 'нет' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div style="margin-top:1rem">
+    {% if pagination.has_prev %}
+      <a href="{{ url_for('admin.users_list', page=pagination.prev_num,
+                          q=request.args.get('q', ''),
+                          status=request.args.get('status', '')) }}">« Назад</a>
+    {% endif %}
+    <span style="margin:0 1rem">
+      Стр. {{ pagination.page }} из {{ pagination.pages }}
+    </span>
+    {% if pagination.has_next %}
+      <a href="{{ url_for('admin.users_list', page=pagination.next_num,
+                          q=request.args.get('q', ''),
+                          status=request.args.get('status', '')) }}">Вперёд »</a>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+```
+
+Страницы ошибок `templates/errors/404.html` и `templates/errors/500.html` — простые HTML‑страницы с сообщением об ошибке и ссылкой «вернуться в панель».
+
+---
+
+## 13) Seed‑скрипт для администратора (быстрый вход)
+
+`seeds/admin_seed.sql`:
+
+```sql
+-- создаём админа (если нет) с простым паролем (учебный стенд)
+INSERT INTO users (login, full_name, email, role_id, is_active, password_hash)
+VALUES ('admin', 'Администратор', 'admin@example.com', 1, 1, 'Admin123!')
+ON DUPLICATE KEY UPDATE
+  role_id = VALUES(role_id),
+  is_active = VALUES(is_active),
+  password_hash = VALUES(password_hash);
+```
+
+Применение:
+
+```bash
+mysql -u root -p theatre < seeds/admin_seed.sql
+```
+
+Рекомендуется заменить простой пароль на хеш:
+
+```python
+from werkzeug.security import generate_password_hash
+print(generate_password_hash("Admin123!"))
+```
+
+И затем:
+
+```sql
+UPDATE users
+SET password_hash = 'PBKDF2_ХЕШ'
+WHERE login = 'admin';
+```
+
+---
+
+## 14) Запуск и проверка
+
+1. Активируйте окружение (если ещё не активно):
+
+   ```powershell
+   .\.venv\Scripts\Activate.ps1
+   ```
+
+2. Убедитесь, что `.env` заполнен корректно.
+3. Запустите приложение:
+
+   ```powershell
+   python app.py
+   ```
+
+4. Откройте в браузере:
+
+   ```text
+   http://127.0.0.1:5000/login
+   ```
+
+5. Войдите: `admin / Admin123!` (или свой пароль/хеш).
+6. Проверьте:
+   - дашборд;
+   - список пользователей;
+   - фильтры;
+   - выход из системы.
+
+---
+
+## 15) Типичные ошибки и быстрые фиксы
+
+- **`1045 Access denied`** — неверные пароль/порт/пользователь.  
+  Проверьте вход через `mysql -u root -p`, экранирование пароля в `DATABASE_URL`, порт (`:3306`).
+
+- **`Invalid hash method ''`** — в БД хранится не хеш, а обычный текст пароля.  
+  Временное решение — использовать `verify_password()` с fallback. Правильное — заменить на PBKDF2‑хеш.
+
+- **`Unknown column`** — несоответствие модели и БД.  
+  Проверьте `DESCRIBE users;` и исправьте модель или структуру таблицы (`ALTER TABLE`).
+
+- **`CSRF token missing`** — не хватает CSRF‑токена в форме.  
+  Убедитесь, что:
+  - в форме есть `{{ form.hidden_tag() }}`;
+  - `CSRFProtect` инициализирован и включён в приложение.
+
+---
+
+## 16) Пример готовой работы
+
+Пример готового учебного проекта:
+
+- репозиторий: `https://github.com/OlgaKraven/theatre_admin`
